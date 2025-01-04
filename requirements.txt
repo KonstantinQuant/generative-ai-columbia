@@ -1,0 +1,13 @@
+pyarrow
+transformers
+sentence_transformers
+streamlit
+langchain
+chromadb
+PyPDF2
+openai
+tiktoken
+requests
+langchain-community
+langchain-openai
+langchain-huggingface
