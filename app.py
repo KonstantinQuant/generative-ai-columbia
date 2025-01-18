@@ -8,12 +8,9 @@ from langchain.docstore.document import Document
 from langchain_community.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain.agents import AgentType, initialize_agent, Tool
-
-# Embeddings & LLM
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import OpenAI
 
-# PDF parsing
 import PyPDF2
 
 st.set_page_config(
@@ -22,9 +19,6 @@ st.set_page_config(
     layout="wide"
 )
 
-#####################################################
-# 1. Cached Functions
-#####################################################
 @st.cache_resource
 def create_llm(api_key: str):
     """
@@ -39,20 +33,16 @@ def create_vectorstore(_docs):
     Cache the creation of the Chroma vector store. 
     If 'docs' has not changed, this won't be recomputed.
     """
-    # Load MiniLM embeddings
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-    # Create Chroma in-memory vector store
     vectorstore = Chroma.from_documents(
         documents=_docs,
         embedding=embeddings,
-        collection_name="financial_docs"
+        collection_name="financial_docs",
+        persist_directory="./chroma_langchain_db",
     )
-    return vectorstore
 
-#####################################################
-# 2. App Layout & Logic
-#####################################################
+    return vectorstore
 
 st.title("Upload Document RAG Application")
 st.write("Upload your documents and ask questions about them.")
@@ -62,7 +52,6 @@ if not openai_api_key:
     st.warning("Please add your OpenAI API key to proceed.")
     st.stop()
 
-# Create or retrieve the cached LLM
 llm = create_llm(openai_api_key)
 
 uploaded_files = st.file_uploader(
@@ -71,9 +60,9 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-all_docs = []  # will store chunked Documents
+all_docs = []
 
-# --- Layout: Two columns side by side
+
 col1, col2 = st.columns([1,1])
 
 with col1:
@@ -90,7 +79,6 @@ with col1:
             )
             st.markdown(f"**File {i+1}:** {uploaded_file.name}")
             st.markdown(pdf_display, unsafe_allow_html=True)
-            # Reset file pointer for parsing
             uploaded_files[i].seek(0)
 
 with col2:
@@ -105,7 +93,6 @@ with col2:
             )
             all_texts.append(text)
 
-        # Split text into chunks
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         for txt in all_texts:
             chunks = text_splitter.split_text(txt)
@@ -117,11 +104,9 @@ with col2:
             vectorstore = create_vectorstore(all_docs)
             retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-            # Session-state for conversation
             if "messages" not in st.session_state:
                 st.session_state["messages"] = []
 
-            # Show chat messages
             for message in st.session_state["messages"]:
                 if message["role"] == "user":
                     with st.chat_message("user"):
@@ -130,15 +115,12 @@ with col2:
                     with st.chat_message("assistant"):
                         st.write(message["content"])
 
-            # Input for user query
             user_query = st.chat_input("Ask a question about your document(s) ...")
             if user_query:
-                # Display the user's message instantly
                 st.session_state["messages"].append({"role": "user", "content": user_query})
                 with st.chat_message("user"):
                     st.write(user_query)
 
-                # Run retrieval-based QA
                 qa_chain = RetrievalQA.from_chain_type(
                     llm=llm,
                     retriever=retriever,
@@ -151,7 +133,6 @@ with col2:
                     answer = result["result"]
                     sources = result["source_documents"]
 
-                # Display the assistant's answer
                 st.session_state["messages"].append({"role": "assistant", "content": answer})
                 with st.chat_message("assistant"):
                     st.write(answer)
@@ -162,12 +143,26 @@ with col2:
     else:
         st.info("No PDF uploaded yet. Please upload one or more PDFs.")
 
-#####################################################
-# 3. Agent Demo (Calculator Tool) - Additional Section
-#####################################################
 
 st.header("Agent Demo: Calculator Tool")
 st.write("Demonstration of using an agent with tools for simple tasks.")
+
+from langchain.callbacks.base import BaseCallbackHandler
+
+class StreamlitCallbackHandler(BaseCallbackHandler):
+    def __init__(self, steps_placeholder):
+        self.steps_placeholder = steps_placeholder
+        self.step_logs = ""
+
+    def on_tool_start(self, tool_name, tool_input, **kwargs):
+        """Logs when a tool starts."""
+        self.step_logs += f"**Tool Used:** {tool_name}\n**Input:** {tool_input}\n\n"
+        self.steps_placeholder.markdown(self.step_logs, unsafe_allow_html=True)
+
+    def on_tool_end(self, output, **kwargs):
+        """Logs when a tool finishes."""
+        self.step_logs += f"**Output:** {output}\n\n---\n\n"
+        self.steps_placeholder.markdown(self.step_logs, unsafe_allow_html=True)
 
 def calculator_tool(input_str: str) -> str:
     """Perform simple mathematical calculations."""
@@ -188,8 +183,20 @@ agent = initialize_agent(agent_tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCR
 agent_query = st.text_input("Ask the agent with tools (e.g., '2+2', '10*5', etc.)")
 if agent_query:
     st.info("Agent is processing...")
+
+    with st.expander("Step-by-Step Agent Logs", expanded=True):
+        st.write("Processing steps will appear here...")
+        steps_placeholder = st.empty()
+
+    callback_handler = StreamlitCallbackHandler(steps_placeholder)
+
     try:
-        response = agent({"input": agent_query})
-        st.write("**Agent Response:**", response.get("output", "No response available"))
+        response = agent.run(
+            input=agent_query,
+            callbacks=[callback_handler]
+        )
+
+        st.success("Agent processing complete!")
+        st.write("**Agent Response:**", response)
     except Exception as e:
         st.error(f"Error: {str(e)}")
