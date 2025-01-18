@@ -9,7 +9,7 @@ from langchain_community.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain.agents import AgentType, initialize_agent, Tool
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import OpenAI
+from langchain_openai import ChatOpenAI
 
 import PyPDF2
 
@@ -25,7 +25,7 @@ def create_llm(api_key: str):
     Cache the creation of the OpenAI LLM so it's not re-initialized on every run
     with the same key & temperature settings.
     """
-    return OpenAI(temperature=0, api_key=api_key)
+    return ChatOpenAI(model="gpt-4o", temperature=0, api_key=api_key)
 
 @st.cache_resource
 def create_vectorstore(_docs):
@@ -93,7 +93,7 @@ with col2:
             )
             all_texts.append(text)
 
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=300)
         for txt in all_texts:
             chunks = text_splitter.split_text(txt)
             for chunk in chunks:
@@ -102,7 +102,7 @@ with col2:
 
         if all_docs:
             vectorstore = create_vectorstore(all_docs)
-            retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
             if "messages" not in st.session_state:
                 st.session_state["messages"] = []
